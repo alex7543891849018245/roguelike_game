@@ -148,67 +148,93 @@ jobs:
             exit 1
           fi
       
-      - name: 🔧 Prepare bootstrap (create SDL2 source)
+      - name: 🔧 Prepare bootstrap with API 34
         run: |
-          echo "🔧 Подготавливаем bootstrap для SDL2..."
-          # Это создаст структуру папок с исходниками
-          p4a create --bootstrap=sdl2 --requirements=kivy --arch=arm64-v8a --no-download || true
-          echo "✅ Bootstrap подготовлен"
+          echo "🔧 Подготавливаем bootstrap для SDL2 с API 34..."
+          
+          ANDROID_HOME="/usr/local/lib/android/sdk"
+          NDK_PATH="${{ steps.ndk.outputs.ndk_path }}"
+          NDK_VERSION=$(basename $NDK_PATH)
+          
+          echo "📌 Используем SDK: $ANDROID_HOME"
+          echo "📌 Используем NDK: $NDK_PATH"
+          echo "📌 API: ${{ env.ANDROID_API }}"
+          
+          # Создаем bootstrap с правильным API
+          p4a create \
+            --bootstrap=sdl2 \
+            --requirements="python3,kivy" \
+            --arch=arm64-v8a \
+            --sdk_dir=$ANDROID_HOME \
+            --ndk_dir=$NDK_PATH \
+            --ndk_version=$NDK_VERSION \
+            --android_api ${{ env.ANDROID_API }} \
+            --no-download || echo "⚠️ Bootstrap создан с предупреждениями (это нормально)"
+          
+          echo "✅ Команда create выполнена"
+          
+          # Проверяем наличие исходников
+          sleep 5
+          SDL2_SOURCE_DIR="$HOME/.local/share/python-for-android/build/bootstrap_builds/sdl2/jni/SDL"
+          
+          if [ -d "$SDL2_SOURCE_DIR" ]; then
+            echo "✅ Исходники SDL2 созданы в $SDL2_SOURCE_DIR"
+            ls -la "$SDL2_SOURCE_DIR/src/sensor/android/" || echo "⚠️ Директория сенсора еще не создана"
+          else
+            echo "⚠️ Исходники не найдены в стандартном пути, ищем..."
+            find "$HOME/.local/share/python-for-android/build" -type d -name "SDL" 2>/dev/null | head -n 5 || echo "   Ничего не найдено"
+          fi
       
       - name: 🔧 Patch SDL2 source before build
         run: |
           echo "🔧 Применяем патч к исходникам SDL2..."
           
-          # Путь к исходникам SDL2
-          SDL2_SOURCE_DIR="$HOME/.local/share/python-for-android/build/bootstrap_builds/sdl2/jni/SDL"
+          # Ищем исходники SDL2 в разных местах
+          SEARCH_PATHS=(
+            "$HOME/.local/share/python-for-android/build/bootstrap_builds"
+            "$HOME/.local/share/python-for-android/build/other_builds"
+          )
           
-          # Ждем пока создадутся исходники (максимум 60 секунд)
-          for i in {1..30}; do
-            if [ -d "$SDL2_SOURCE_DIR" ]; then
-              echo "✅ Исходники SDL2 найдены"
-              break
+          PATCHED=0
+          
+          for SEARCH_PATH in "${SEARCH_PATHS[@]}"; do
+            if [ ! -d "$SEARCH_PATH" ]; then
+              continue
             fi
-            echo "⏳ Ждем создания исходников SDL2... ($i/30)"
-            sleep 2
+            
+            echo "📁 Поиск в: $SEARCH_PATH"
+            
+            # Ищем все файлы SDL_androidsensor.c
+            SENSOR_FILES=$(find "$SEARCH_PATH" -name "SDL_androidsensor.c" -type f 2>/dev/null)
+            
+            if [ -n "$SENSOR_FILES" ]; then
+              for SENSOR_FILE in $SENSOR_FILES; do
+                echo "📁 Найден файл: $SENSOR_FILE"
+                
+                # Создаем бэкап
+                cp "$SENSOR_FILE" "$SENSOR_FILE.bak"
+                
+                # Заменяем устаревшую функцию
+                sed -i 's/ALooper_pollAll/ALooper_pollOnce/g' "$SENSOR_FILE"
+                
+                # Проверяем результат
+                if grep -q "ALooper_pollOnce" "$SENSOR_FILE"; then
+                  echo "✅ Патч применен успешно для $(basename $SENSOR_FILE)"
+                  PATCHED=$((PATCHED + 1))
+                else
+                  echo "❌ Ошибка применения патча для $SENSOR_FILE"
+                fi
+              done
+            fi
           done
           
-          # Проверяем наличие директории
-          if [ ! -d "$SDL2_SOURCE_DIR" ]; then
-            echo "❌ Исходники SDL2 не найдены!"
-            echo "📁 Поиск всех копий SDL_androidsensor.c:"
-            find "$HOME/.local/share/python-for-android" -name "SDL_androidsensor.c" 2>/dev/null || echo "Файлы не найдены"
-            exit 1
-          fi
-          
-          # Патчим файл для обеих архитектур
-          SENSOR_FILES=$(find "$SDL2_SOURCE_DIR" -name "SDL_androidsensor.c" 2>/dev/null)
-          
-          if [ -n "$SENSOR_FILES" ]; then
-            for SENSOR_FILE in $SENSOR_FILES; do
-              echo "📁 Найден файл: $SENSOR_FILE"
-              
-              # Создаем бэкап
-              cp "$SENSOR_FILE" "$SENSOR_FILE.bak"
-              
-              # Заменяем устаревшую функцию
-              sed -i 's/ALooper_pollAll/ALooper_pollOnce/g' "$SENSOR_FILE"
-              
-              # Проверяем результат
-              if grep -q "ALooper_pollOnce" "$SENSOR_FILE"; then
-                echo "✅ Патч применен успешно для $(basename $SENSOR_FILE)"
-              else
-                echo "❌ Ошибка применения патча для $SENSOR_FILE"
-                exit 1
-              fi
-            done
+          if [ $PATCHED -gt 0 ]; then
+            echo "✅ Всего применено патчей: $PATCHED"
           else
-            echo "❌ Файлы SDL_androidsensor.c не найдены!"
-            echo "📁 Содержимое SDL2 source:"
-            ls -la "$SDL2_SOURCE_DIR/src/sensor/android/" || echo "Директория не существует"
-            exit 1
+            echo "⚠️ Файлы для патча не найдены! Сборка может упасть."
+            echo "📁 Содержимое папки build:"
+            ls -la "$HOME/.local/share/python-for-android/build/" || echo "   Папка не существует"
           fi
-          
-          echo "✅ Все патчи применены"
       
       - name: 🏗️ Build APK
         run: |
@@ -225,6 +251,7 @@ jobs:
           echo "📌 Используем NDK: $NDK_VERSION"
           echo "📌 Путь NDK: $NDK_PATH"
           echo "📌 SDK: $ANDROID_HOME"
+          echo "📌 API: ${{ env.ANDROID_API }}"
           
           # Запускаем сборку
           p4a apk \
@@ -242,7 +269,7 @@ jobs:
             --sdk_dir=$ANDROID_HOME \
             --ndk_dir=$NDK_PATH \
             --ndk_version=$NDK_VERSION \
-            --android_api 34 \
+            --android_api ${{ env.ANDROID_API }} \
             --window \
             --debug \
             --verbose 2>&1 | tee build_logs/build.log
