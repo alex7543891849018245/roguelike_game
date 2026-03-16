@@ -1,34 +1,86 @@
-name: Build Android APK
+name: 🏗️ Сборка Android APK
+
+# Эмодзи для наглядности процесса сборки
+env:
+  APP_NAME: "Roguelike Adventure"
+  PACKAGE_NAME: "org.alexstudiocode.roguelike"
+  VERSION: "0.1.3"
 
 on:
   push:
     branches: [ "main", "master" ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Версия для сборки'
+        description: '📦 Версия приложения'
         required: false
         default: '0.1.3'
-        type: string
+      build_type:
+        description: '🔧 Тип сборки'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # ВАЖНО: используем Ubuntu 22.04 вместо 24.04
+    name: 📱 Сборка APK
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+      checks: write
     
     steps:
-      - name: Checkout code
+      # Шаг 1: Получение кода
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
       
-      - name: Set up Python
+      # Шаг 2: Настройка Python
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           cache: 'pip'
+          architecture: 'x64'
       
-      - name: Install system dependencies
+      # Шаг 3: Кэширование зависимостей
+      - name: 💾 Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android
+            ~/.buildozer
+            ~/.cache/pip
+            ~/.ccache
+          key: ${{ runner.os }}-android-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-android-
+      
+      # Шаг 4: Освобождение места
+      - name: 🧹 Free disk space
         run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
+          sudo apt clean
+          docker rmi $(docker image ls -aq) 2>/dev/null || true
+          echo "💾 Свободное место:"
+          df -h
+      
+      # Шаг 5: Установка системных зависимостей
+      - name: 📦 Install system dependencies
+        run: |
+          echo "📦 Установка необходимых пакетов..."
           sudo apt update
           sudo apt install -y \
             git \
@@ -36,44 +88,79 @@ jobs:
             unzip \
             openjdk-17-jdk \
             python3-pip \
+            python3-venv \
             autoconf \
             libtool \
             pkg-config \
             zlib1g-dev \
             libncurses5-dev \
             libncursesw5-dev \
-            libtinfo5 \          # В Ubuntu 22.04 этот пакет есть!
+            libtinfo5 \
             cmake \
             libffi-dev \
             libssl-dev \
             wget \
             curl \
             build-essential \
-            ccache
+            ccache \
+            software-properties-common
+          
+          echo "✅ Системные зависимости установлены"
+          java -version
       
-      - name: Install Python dependencies
+      # Шаг 6: Установка Python-зависимостей
+      - name: 📦 Install Python dependencies
         run: |
-          pip install --upgrade pip
+          echo "📦 Установка Python пакетов..."
+          pip install --upgrade pip setuptools wheel
           pip install python-for-android cython
+          
           if [ -f requirements.txt ]; then
+            echo "📦 Установка зависимостей из requirements.txt"
             pip install -r requirements.txt
+          else
+            echo "⚠️ requirements.txt не найден"
           fi
+          
+          echo "✅ Python зависимости установлены"
+          pip list
       
-      - name: Set version
+      # Шаг 7: Определение версии
+      - name: 🔖 Set version
         id: version
         run: |
           if [[ "${{ github.event.inputs.version }}" != "" ]]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            VERSION="${{ github.event.inputs.version }}"
           else
-            echo "version=0.1.3" >> $GITHUB_OUTPUT
+            VERSION="${{ env.VERSION }}"
           fi
+          
+          if [[ "${{ github.event.inputs.build_type }}" == "release" ]]; then
+            BUILD_TYPE="release"
+          else
+            BUILD_TYPE="debug"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_type=$BUILD_TYPE" >> $GITHUB_OUTPUT
+          echo "📌 Версия: $VERSION"
+          echo "🔧 Тип сборки: $BUILD_TYPE"
       
-      - name: Build APK
+      # Шаг 8: Сборка APK
+      - name: 🏗️ Build APK with python-for-android
         run: |
+          echo "🏗️ Начинаем сборку APK..."
+          echo "📱 Приложение: ${{ env.APP_NAME }}"
+          echo "📦 Пакет: ${{ env.PACKAGE_NAME }}"
+          
+          # Создаем временную папку для логов
+          mkdir -p build_logs
+          
+          # Запускаем сборку
           p4a apk \
             --private . \
-            --package=org.alexstudiocode.roguelike \
-            --name "Roguelike Adventure" \
+            --package="${{ env.PACKAGE_NAME }}" \
+            --name "${{ env.APP_NAME }}" \
             --version ${{ steps.version.outputs.version }} \
             --bootstrap=sdl2 \
             --requirements="python3,kivy==2.2.1,pyjnius,android" \
@@ -83,12 +170,109 @@ jobs:
             --permission READ_EXTERNAL_STORAGE \
             --orientation=landscape \
             --window \
-            --verbose
+            --add-source . \
+            --${{ steps.version.outputs.build_type }} \
+            --verbose 2>&1 | tee build_logs/build.log
+          
+          echo "✅ Сборка завершена"
       
-      - name: Upload APK
+      # Шаг 9: Поиск и подготовка APK
+      - name: 🔍 Find and prepare APK
+        id: apk
+        run: |
+          echo "🔍 Поиск готового APK файла..."
+          
+          # Ищем все APK файлы
+          APK_FILES=$(find . -name "*.apk" -type f | sort)
+          APK_COUNT=$(echo "$APK_FILES" | wc -l)
+          
+          if [ -z "$APK_FILES" ]; then
+            echo "❌ APK файл не найден!"
+            echo "📋 Содержимое папки:"
+            ls -la
+            echo "📋 Логи сборки:"
+            cat build_logs/build.log
+            exit 1
+          fi
+          
+          echo "✅ Найдено APK файлов: $APK_COUNT"
+          echo "$APK_FILES" | while read file; do
+            echo "   📦 $(basename $file) - $(ls -lh $file | awk '{print $5}')"
+          done
+          
+          # Берем первый APK
+          FIRST_APK=$(echo "$APK_FILES" | head -n 1)
+          FILENAME="${{ env.APP_NAME }}-v${{ steps.version.outputs.version }}-${{ steps.version.outputs.build_type }}.apk"
+          FILENAME_CLEAN=$(echo "$FILENAME" | tr ' ' '-')
+          
+          cp "$FIRST_APK" "./$FILENAME_CLEAN"
+          
+          echo "📦 Итоговый файл: $FILENAME_CLEAN"
+          echo "filename=$FILENAME_CLEAN" >> $GITHUB_OUTPUT
+          echo "size=$(ls -lh $FILENAME_CLEAN | awk '{print $5}')" >> $GITHUB_OUTPUT
+      
+      # Шаг 10: Загрузка APK как артефакта
+      - name: 📤 Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: roguelike-adventure-v${{ steps.version.outputs.version }}
-          path: ./*.apk
+          name: ${{ steps.apk.outputs.filename }}
+          path: ./${{ steps.apk.outputs.filename }}
           if-no-files-found: error
           retention-days: 90
+          compression-level: 0
+      
+      # Шаг 11: Создание отчета о сборке
+      - name: 📊 Build summary
+        run: |
+          echo "## 📱 Результат сборки" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Параметр | Значение |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Приложение** | ${{ env.APP_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Пакет** | `${{ env.PACKAGE_NAME }}` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Версия** | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Тип сборки** | ${{ steps.version.outputs.build_type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Файл** | \`${{ steps.apk.outputs.filename }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Размер** | ${{ steps.apk.outputs.size }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Архитектуры** | arm64-v8a, armeabi-v7a |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Сборка успешно завершена!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⬇️ Скачайте APK из раздела **Artifacts** выше" >> $GITHUB_STEP_SUMMARY
+      
+      # Шаг 12: Создание релиза (только для тегов)
+      - name: 🏷️ Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./${{ steps.apk.outputs.filename }}
+          name: ${{ env.APP_NAME }} v${{ steps.version.outputs.version }}
+          body: |
+            ## 🎮 ${{ env.APP_NAME }} v${{ steps.version.outputs.version }}
+            
+            ### 📱 Информация о сборке
+            - **Версия:** ${{ steps.version.outputs.version }}
+            - **Тип:** ${{ steps.version.outputs.build_type }}
+            - **Размер:** ${{ steps.apk.outputs.size }}
+            - **Дата:** $(date +'%d.%m.%Y')
+            
+            ### 📦 Поддерживаемые архитектуры
+            - arm64-v8a (64-битные устройства)
+            - armeabi-v7a (32-битные устройства)
+            
+            ### 🔧 Требования
+            - Android 5.0 (API 21) и выше
+            - Разрешение на установку из неизвестных источников
+            
+            ### ✨ Как установить
+            1. Скачайте APK файл
+            2. Откройте его на устройстве
+            3. Подтвердите установку
+            
+            ### ⚠️ Примечания
+            - Первый запуск может быть долгим
+            - Для сохранений требуется доступ к хранилищу
+          draft: false
+          prerelease: ${{ steps.version.outputs.build_type == 'debug' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
