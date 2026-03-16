@@ -1,20 +1,10 @@
 name: Build Android APK
 
-# Когда запускать сборку
 on:
-  # При пуше в main/master
   push:
     branches: [ "main", "master" ]
-  
-  # При создании pull request
   pull_request:
     branches: [ "main", "master" ]
-  
-  # При создании тега (релиза)
-  release:
-    types: [published]
-  
-  # Возможность запустить вручную
   workflow_dispatch:
     inputs:
       version:
@@ -25,44 +15,18 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # ВАЖНО: используем Ubuntu 22.04 вместо 24.04
     
     steps:
-      # 1. Получение кода
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
-      # 2. Настройка Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           cache: 'pip'
       
-      # 3. Кэширование зависимостей Android SDK
-      - name: Cache Android SDK
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.android
-            ~/.buildozer
-            ~/.cache/pip
-          key: ${{ runner.os }}-android-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-android-
-      
-      # 4. Освобождение места на диске
-      - name: Free disk space
-        run: |
-          sudo swapoff -a
-          sudo rm -f /swapfile
-          sudo apt clean
-          docker rmi $(docker image ls -aq) || true
-          df -h
-      
-      # 5. Установка системных зависимостей
       - name: Install system dependencies
         run: |
           sudo apt update
@@ -72,14 +36,13 @@ jobs:
             unzip \
             openjdk-17-jdk \
             python3-pip \
-            python3-venv \
             autoconf \
             libtool \
             pkg-config \
             zlib1g-dev \
             libncurses5-dev \
             libncursesw5-dev \
-            libtinfo5 \
+            libtinfo5 \          # В Ubuntu 22.04 этот пакет есть!
             cmake \
             libffi-dev \
             libssl-dev \
@@ -88,11 +51,6 @@ jobs:
             build-essential \
             ccache
       
-      # 6. Проверка Java
-      - name: Verify Java
-        run: java -version
-      
-      # 7. Установка Python-зависимостей
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
@@ -101,20 +59,16 @@ jobs:
             pip install -r requirements.txt
           fi
       
-      # 8. Определение версии
       - name: Set version
         id: version
         run: |
           if [[ "${{ github.event.inputs.version }}" != "" ]]; then
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             echo "version=0.1.3" >> $GITHUB_OUTPUT
           fi
       
-      # 9. Сборка APK с python-for-android
-      - name: Build APK with python-for-android
+      - name: Build APK
         run: |
           p4a apk \
             --private . \
@@ -129,72 +83,12 @@ jobs:
             --permission READ_EXTERNAL_STORAGE \
             --orientation=landscape \
             --window \
-            --add-source . \
-            --verbose \
-            --debug
-        env:
-          P4A_DEBUG: 1
+            --verbose
       
-      # 10. Поиск и подготовка APK
-      - name: Find and prepare APK
-        run: |
-          # Ищем все APK файлы
-          APK_FILES=$(find . -name "*.apk" -type f)
-          APK_COUNT=$(echo "$APK_FILES" | wc -l)
-          
-          if [ -z "$APK_FILES" ]; then
-            echo "❌ APK файл не найден!"
-            exit 1
-          fi
-          
-          echo "✅ Найдено APK файлов: $APK_COUNT"
-          
-          # Копируем первый найденный APK в корень с понятным именем
-          FIRST_APK=$(echo "$APK_FILES" | head -n 1)
-          FINAL_NAME="roguelike-adventure-v${{ steps.version.outputs.version }}.apk"
-          cp "$FIRST_APK" "./$FINAL_NAME"
-          
-          echo "📦 APK сохранен как: $FINAL_NAME"
-          echo "final_name=$FINAL_NAME" >> $GITHUB_OUTPUT
-        id: apk
-      
-      # 11. Загрузка APK как артефакта
-      - name: Upload APK as artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.apk.outputs.final_name }}
-          path: ./${{ steps.apk.outputs.final_name }}
+          name: roguelike-adventure-v${{ steps.version.outputs.version }}
+          path: ./*.apk
           if-no-files-found: error
           retention-days: 90
-          compression-level: 0  # APK уже сжат
-      
-      # 12. Создание релиза (только для тегов)
-      - name: Create Release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: ./${{ steps.apk.outputs.final_name }}
-          name: Release ${{ steps.version.outputs.version }}
-          body: |
-            ## Roguelike Adventure v${{ steps.version.outputs.version }}
-            
-            ### 📱 Сборка для Android
-            - Архитектуры: arm64-v8a, armeabi-v7a
-            - Требуется Android 5.0+
-            - Ориентация: ландшафтная
-            
-            ### ✨ Как установить
-            1. Скачайте APK файл
-            2. Разрешите установку из неизвестных источников
-            3. Откройте файл и установите
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      # 13. Информация о размере APK
-      - name: Get APK size
-        run: |
-          APK_SIZE=$(ls -lh ${{ steps.apk.outputs.final_name }} | awk '{print $5}')
-          echo "📊 Размер APK: $APK_SIZE"
-          echo "✅ Сборка успешно завершена!"
