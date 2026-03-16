@@ -170,18 +170,6 @@ jobs:
           mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
           ln -sf $SDKMANAGER ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
           
-          # Проверяем наличие build-tools
-          if [ -d ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0 ]; then
-            echo "✅ build-tools 33.0.0 успешно установлены"
-          else
-            echo "⚠️ build-tools не установлены, создаем заглушки"
-            mkdir -p ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0
-            for tool in aapt aidl dexd8 d8 dx llvm-rs-cc; do
-              touch ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0/$tool
-              chmod +x ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0/$tool
-            done
-          fi
-          
           echo "✅ Компоненты SDK установлены"
       
       - name: 🏗️ Build APK with Buildozer
@@ -195,8 +183,8 @@ jobs:
           export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:~/.buildozer/android/platform/android-sdk/platform-tools
           export ANDROID_HOME=~/.buildozer/android/platform/android-sdk
           export ANDROID_SDK_ROOT=~/.buildozer/android/platform/android-sdk
-          export ANDROID_NDK_HOME=~/.buildozer/android/platform/android-ndk-r23b
-          export NDK_HOME=~/.buildozer/android/platform/android-ndk-r23b
+          export ANDROID_NDK_HOME=~/.buildozer/android/platform/android-ndk-25b
+          export NDK_HOME=~/.buildozer/android/platform/android-ndk-25b
           
           # Создаем папку для логов
           mkdir -p build_logs
