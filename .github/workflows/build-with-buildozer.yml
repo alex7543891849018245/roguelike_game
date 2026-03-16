@@ -183,8 +183,8 @@ jobs:
           export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:~/.buildozer/android/platform/android-sdk/platform-tools
           export ANDROID_HOME=~/.buildozer/android/platform/android-sdk
           export ANDROID_SDK_ROOT=~/.buildozer/android/platform/android-sdk
-          export ANDROID_NDK_HOME=~/.buildozer/android/platform/android-ndk-25b
-          export NDK_HOME=~/.buildozer/android/platform/android-ndk-25b
+          export ANDROID_NDK_HOME=~/.buildozer/android/platform/android-ndk-r25b
+          export NDK_HOME=~/.buildozer/android/platform/android-ndk-r25b
           
           # Создаем папку для логов
           mkdir -p build_logs
