@@ -1,0 +1,125 @@
+name: 🏗️ Сборка APK с Buildozer
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:  # возможность запустить вручную
+
+jobs:
+  build:
+    name: 📱 Сборка APK
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+      
+      - name: 📦 Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            python3-pip \
+            autoconf \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo5 \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            wget \
+            curl \
+            build-essential \
+            ccache
+      
+      - name: 📦 Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install buildozer cython
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+      
+      - name: 💾 Cache Buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            ~/.android
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
+      
+      - name: 🏗️ Build APK with Buildozer
+        run: |
+          # Создаем папку для логов
+          mkdir -p build_logs
+          
+          # Запускаем сборку
+          buildozer android debug 2>&1 | tee build_logs/build.log
+          
+          # Проверяем результат
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "✅ Сборка успешно завершена!"
+          else
+            echo "❌ Ошибка сборки!"
+            exit 1
+          fi
+      
+      - name: 🔍 Find APK
+        id: apk
+        run: |
+          # Ищем APK файл
+          APK_FILE=$(find bin -name "*.apk" | head -n 1)
+          
+          if [ -z "$APK_FILE" ]; then
+            echo "❌ APK файл не найден!"
+            echo "📋 Содержимое папки bin:"
+            ls -la bin/ || echo "Папка bin пуста"
+            echo "📋 Логи сборки:"
+            cat build_logs/build.log
+            exit 1
+          fi
+          
+          echo "✅ Найден APK: $APK_FILE"
+          echo "📦 Размер: $(ls -lh $APK_FILE | awk '{print $5}')"
+          
+          # Копируем в корень с понятным именем
+          FILENAME="Roguelike-Adventure-${{ github.sha }}.apk"
+          cp "$APK_FILE" "./$FILENAME"
+          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
+      
+      - name: 📤 Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.filename }}
+          path: ./${{ steps.apk.outputs.filename }}
+          if-no-files-found: error
+          retention-days: 90
+      
+      - name: 📊 Build Summary
+        run: |
+          echo "## 📱 Результат сборки" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **APK успешно собран!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Файл" >> $GITHUB_STEP_SUMMARY
+          echo "- **Имя:** \`${{ steps.apk.outputs.filename }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Размер:** $(ls -lh ${{ steps.apk.outputs.filename }} | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 Скачать" >> $GITHUB_STEP_SUMMARY
+          echo "APK доступен в разделе **Artifacts** выше ☝️" >> $GITHUB_STEP_SUMMARY
