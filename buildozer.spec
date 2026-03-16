@@ -58,7 +58,7 @@ android.ndk = 23b
 # (str) Версия build-tools (важно для избежания проблем)
 android.build_tools = 33.0.0
 
-# (str) Архитектуры (только 64-bit для ускорения)
+# (str) Архитектуры - ТОЛЬКО arm64-v8a для ускорения в 2 раза
 android.archs = arm64-v8a
 
 # (bool) Включить поддержку AndroidX
