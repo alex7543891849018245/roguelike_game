@@ -60,6 +60,9 @@ jobs:
             mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
           fi
           
+          # Добавляем в PATH
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+          
           # Принимаем лицензии
           touch $ANDROID_HOME/licenses/android-sdk-license
           echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > $ANDROID_HOME/licenses/android-sdk-license
@@ -145,6 +148,43 @@ jobs:
             exit 1
           fi
       
+      - name: 🔧 Patch SDL2 for NDK 27+
+        run: |
+          echo "🔧 Применяем патч для SDL2..."
+          
+          # Ждем немного, чтобы файлы создались
+          sleep 10
+          
+          # Ищем файл с ошибкой
+          SENSOR_FILE=$(find ~/.local/share/python-for-android -name "SDL_androidsensor.c" | head -n 1)
+          
+          if [ -f "$SENSOR_FILE" ]; then
+            echo "📁 Найден файл: $SENSOR_FILE"
+            
+            # Создаем бэкап
+            cp "$SENSOR_FILE" "$SENSOR_FILE.bak"
+            
+            # Заменяем устаревшую функцию
+            sed -i 's/ALooper_pollAll/ALooper_pollOnce/g' "$SENSOR_FILE"
+            
+            echo "✅ Патч применен! ALooper_pollAll заменен на ALooper_pollOnce"
+            echo "📋 Бэкап сохранен: $SENSOR_FILE.bak"
+          else
+            echo "⚠️ Файл не найден, пробуем другой путь..."
+            
+            # Альтернативный поиск
+            SENSOR_FILE=$(find /home/runner -name "SDL_androidsensor.c" 2>/dev/null | head -n 1)
+            
+            if [ -f "$SENSOR_FILE" ]; then
+              echo "📁 Найден файл: $SENSOR_FILE"
+              cp "$SENSOR_FILE" "$SENSOR_FILE.bak"
+              sed -i 's/ALooper_pollAll/ALooper_pollOnce/g' "$SENSOR_FILE"
+              echo "✅ Патч применен!"
+            else
+              echo "❌ Файл не найден! Сборка может упасть, но пробуем продолжить."
+            fi
+          fi
+      
       - name: 🏗️ Build APK
         run: |
           echo "🏗️ Начинаем сборку APK..."
@@ -200,6 +240,7 @@ jobs:
           cp "$FIRST_APK" "./$FILENAME_CLEAN"
           echo "📦 APK готов: $FILENAME_CLEAN"
           echo "filename=$FILENAME_CLEAN" >> $GITHUB_OUTPUT
+          echo "size=$(ls -lh $FILENAME_CLEAN | awk '{print $5}')" >> $GITHUB_OUTPUT
       
       - name: 📤 Upload APK
         uses: actions/upload-artifact@v4
@@ -207,3 +248,17 @@ jobs:
           name: ${{ steps.apk.outputs.filename }}
           path: ./${{ steps.apk.outputs.filename }}
           retention-days: 90
+      
+      - name: 📊 Build summary
+        run: |
+          echo "## 📱 Результат сборки" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Параметр | Значение |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Приложение** | ${{ env.APP_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Пакет** | \`${{ env.PACKAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Версия** | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Файл** | \`${{ steps.apk.outputs.filename }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Размер** | ${{ steps.apk.outputs.size }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Сборка успешно завершена!**" >> $GITHUB_STEP_SUMMARY
