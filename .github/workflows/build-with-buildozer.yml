@@ -1,9 +1,7 @@
-name: 🏗️ Сборка APK с Buildozer
+name: 🏗️ Сборка APK (только arm64-v8a)
 
 on:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
     inputs:
@@ -19,21 +17,15 @@ on:
 
 jobs:
   build:
-    name: 📱 Сборка APK
+    name: 📱 Сборка APK (arm64-v8a)
     runs-on: ubuntu-22.04
-    timeout-minutes: 60  # Максимальное время сборки
-    
-    strategy:
-      fail-fast: false  # Не останавливать при первой ошибке
-      matrix:
-        arch: [arm64-v8a]  # Можно добавить armeabi-v7a если нужно
+    timeout-minutes: 40  # Меньше времени, так как только одна архитектура
     
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          lfs: false
       
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
@@ -69,8 +61,6 @@ jobs:
             curl \
             build-essential \
             ccache \
-            software-properties-common \
-            ninja-build \
             patchelf \
             && echo "✅ Системные зависимости установлены"
       
@@ -92,9 +82,9 @@ jobs:
             ~/.buildozer
             ~/.android
             ~/.ccache
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}-${{ github.sha }}
+          key: ${{ runner.os }}-buildozer-arm64-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
+            ${{ runner.os }}-buildozer-arm64-
             ${{ runner.os }}-buildozer-
       
       - name: 🧹 Clean cache (if requested)
@@ -110,20 +100,17 @@ jobs:
         run: |
           echo "🔧 Применяем предварительные исправления..."
           
-          # === 1. Исправление для лицензий SDK ===
+          # Исправление для лицензий SDK
           mkdir -p ~/.android
           touch ~/.android/repositories.cfg
           
-          # === 2. Исправление для build-tools ===
+          # Исправление для build-tools
           mkdir -p ~/.buildozer/android/platform/android-sdk/build-tools
           
-          # === 3. Исправление для NDK ===
+          # Исправление для NDK
           rm -rf ~/.buildozer/android/platform/android-ndk-* 2>/dev/null || true
           
-          # === 4. Исправление для PATH ===
-          echo 'export PATH=$PATH:~/.local/bin:~/.buildozer/android/platform/android-sdk/platform-tools' >> ~/.bashrc
-          
-          # === 5. Исправление для ccache ===
+          # Исправление для ccache
           ccache -M 5G
           ccache -s
           
@@ -164,7 +151,6 @@ jobs:
         run: |
           echo "🔧 Проверка компонентов Android SDK..."
           
-          # Создаем локальный SDK если нужно
           export ANDROID_HOME=~/.buildozer/android/platform/android-sdk
           export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
           
@@ -183,8 +169,6 @@ jobs:
           if [ -f "$ANDROID_HOME/build-tools/33.0.0/aidl" ]; then
             echo "✅ aidl найден"
             ln -sf "$ANDROID_HOME/build-tools/33.0.0/aidl" "$ANDROID_HOME/build-tools/aidl" || true
-          else
-            echo "⚠️ aidl не найден, но buildozer должен создать его"
           fi
           
           echo "✅ Проверка завершена"
@@ -192,45 +176,29 @@ jobs:
       - name: 🏗️ Build APK with Buildozer
         id: build
         run: |
-          echo "🏗️ Начинаем сборку APK..."
+          echo "🏗️ Начинаем сборку APK (только arm64-v8a)..."
           echo "📱 Приложение: Roguelike Adventure"
           echo "📦 Версия: ${{ github.event.inputs.version || '0.1.3' }}"
           
           # Создаем папку для логов
           mkdir -p build_logs
           
-          # Пробуем сборку до 3 раз
-          MAX_RETRIES=3
-          RETRY_COUNT=0
+          # Запускаем сборку с таймаутом
+          timeout 35m buildozer android debug 2>&1 | tee build_logs/build.log
           
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            echo "🔄 Попытка сборки #$((RETRY_COUNT+1))..."
-            
-            # Запускаем сборку с таймаутом
-            timeout 45m buildozer android debug 2>&1 | tee build_logs/build_$RETRY_COUNT.log
-            
-            # Проверяем наличие APK
-            APK_FILE=$(find bin -name "*.apk" 2>/dev/null | head -n 1)
-            
-            if [ -n "$APK_FILE" ]; then
-              echo "✅ APK найден! Сборка успешна на попытке #$((RETRY_COUNT+1))"
-              echo "apk_file=$APK_FILE" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            
-            echo "⚠️ APK не найден, очищаем и пробуем снова..."
-            
-            # Очищаем временные файлы но сохраняем SDK
-            rm -rf ~/.buildozer/android/platform/build-* 2>/dev/null || true
-            rm -rf ~/.buildozer/android/platform/android-ndk-* 2>/dev/null || true
-            
-            RETRY_COUNT=$((RETRY_COUNT+1))
-          done
+          # Проверяем наличие APK
+          APK_FILE=$(find bin -name "*.apk" 2>/dev/null | head -n 1)
           
-          echo "❌ Не удалось собрать APK после $MAX_RETRIES попыток"
-          echo "📋 Последние 50 строк последнего лога:"
-          tail -n 50 build_logs/build_$((MAX_RETRIES-1)).log
-          exit 1
+          if [ -n "$APK_FILE" ]; then
+            echo "✅ APK найден!"
+            echo "apk_file=$APK_FILE" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "❌ APK не найден!"
+            echo "📋 Последние 50 строк лога:"
+            tail -n 50 build_logs/build.log
+            exit 1
+          fi
       
       - name: 🔍 Find and prepare APK
         if: steps.build.outputs.apk_file != ''
@@ -239,22 +207,12 @@ jobs:
           APK_FILE="${{ steps.build.outputs.apk_file }}"
           
           if [ ! -f "$APK_FILE" ]; then
-            # Ищем альтернативный APK
             APK_FILE=$(find bin -name "*.apk" | head -n 1)
           fi
           
-          if [ -z "$APK_FILE" ]; then
-            echo "❌ APK файл не найден!"
-            exit 1
-          fi
-          
-          echo "✅ Найден APK: $APK_FILE"
-          echo "📦 Размер: $(ls -lh $APK_FILE | awk '{print $5}')"
-          
-          # Генерируем имя файла
           VERSION="${{ github.event.inputs.version || '0.1.3' }}"
           SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          FILENAME="Roguelike-Adventure-v${VERSION}-${SHORT_SHA}.apk"
+          FILENAME="Roguelike-Adventure-v${VERSION}-arm64-${SHORT_SHA}.apk"
           
           cp "$APK_FILE" "./$FILENAME"
           echo "filename=$FILENAME" >> $GITHUB_OUTPUT
@@ -268,12 +226,11 @@ jobs:
           path: ./${{ steps.apk.outputs.filename }}
           if-no-files-found: error
           retention-days: 90
-          compression-level: 0
       
       - name: 📊 Build Summary
         if: always()
         run: |
-          echo "## 📱 Результат сборки" >> $GITHUB_STEP_SUMMARY
+          echo "## 📱 Результат сборки (arm64-v8a)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -n "${{ steps.apk.outputs.filename }}" ]; then
@@ -282,35 +239,10 @@ jobs:
             echo "### 📦 Файл" >> $GITHUB_STEP_SUMMARY
             echo "- **Имя:** \`${{ steps.apk.outputs.filename }}\`" >> $GITHUB_STEP_SUMMARY
             echo "- **Размер:** ${{ steps.apk.outputs.size }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Архитектура:** arm64-v8a (64-бит)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 📥 Скачать" >> $GITHUB_STEP_SUMMARY
             echo "APK доступен в разделе **Artifacts** выше ☝️" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Сборка не удалась**" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🔍 Диагностика" >> $GITHUB_STEP_SUMMARY
-            echo "Проверьте логи выше для исправления ошибок." >> $GITHUB_STEP_SUMMARY
           fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ⚡ Статистика ccache" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          ccache -s >> $GITHUB_STEP_SUMMARY 2>&1 || true
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-      
-      - name: 🔍 Debug information (if failed)
-        if: failure()
-        run: |
-          echo "🔍 Сбор информации для отладки..."
-          
-          echo "📁 Содержимое папки bin:"
-          ls -la bin/ || echo "Папка bin не существует"
-          
-          echo "📁 Содержимое ~/.buildozer:"
-          ls -la ~/.buildozer/ || echo "Папка .buildozer не существует"
-          
-          echo "📁 Содержимое ~/.android:"
-          ls -la ~/.android/ || echo "Папка .android не существует"
-          
-          echo "📋 Логи сборки:"
-          find build_logs -name "*.log" -exec sh -c 'echo "=== {} ==="; tail -n 20 {}' \;
