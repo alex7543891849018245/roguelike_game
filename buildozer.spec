@@ -67,12 +67,6 @@ android.use_androidx = True
 # (bool) Включить прозрачный фон для заставки
 android.transparent_presplash = True
 
-# (str) Путь к иконке (если есть)
-# icon.filename = %(source.dir)s/icon.png
-
-# (str) Путь к заставке (если есть)
-# presplash.filename = %(source.dir)s/splash.png
-
 # (str) Цвет заставки
 presplash_color = #000000
 
