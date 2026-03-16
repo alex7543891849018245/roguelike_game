@@ -4,8 +4,8 @@ env:
   APP_NAME: "Roguelike Adventure"
   PACKAGE_NAME: "org.alexstudiocode.roguelike"
   VERSION: "0.1.3"
-  ANDROID_API: "34"  # Меняем на 34 (доступен по умолчанию)
-  ANDROID_NDK: "25b"
+  ANDROID_API: "34"
+  ANDROID_NDK_VERSION: "25.2.9519653"  # Точная версия NDK
 
 on:
   push:
@@ -32,10 +32,10 @@ jobs:
           python-version: '3.9'
           cache: 'pip'
       
-      # Установка Android SDK компонентов
-      - name: 🤖 Setup Android SDK
+      # Установка Android SDK и NDK
+      - name: 🤖 Setup Android SDK and NDK
         run: |
-          echo "📦 Установка Android SDK компонентов..."
+          echo "📦 Установка Android SDK и NDK..."
           
           # Создаем директории
           mkdir -p $ANDROID_HOME/cmdline-tools
@@ -54,12 +54,17 @@ jobs:
           # Добавляем в PATH
           export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
           
-          # Устанавливаем необходимые компоненты
-          echo "📦 Установка platform-tools..."
+          # Устанавливаем SDK компоненты
+          echo "📦 Установка platform-tools и платформ..."
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-${{ env.ANDROID_API }}" "build-tools;34.0.0" --verbose
+          sdkmanager "platform-tools" "platforms;android-${{ env.ANDROID_API }}" "build-tools;34.0.0"
           
-          echo "✅ Android SDK готов"
+          # Устанавливаем NDK
+          echo "📦 Установка NDK ${{ env.ANDROID_NDK_VERSION }}..."
+          sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}"
+          
+          echo "✅ Android SDK и NDK установлены"
+          ls -la $ANDROID_HOME/ndk/
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
       
@@ -71,12 +76,13 @@ jobs:
             python3-pip autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev \
             libtinfo5 cmake libffi-dev libssl-dev \
-            wget curl build-essential ccache
+            wget curl build-essential ccache \
+            libstdc++-12-dev
       
       - name: 📦 Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install python-for-android cython
+          pip install --upgrade pip setuptools wheel
+          pip install python-for-android cython==0.29.36
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
@@ -88,13 +94,49 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📌 Версия: $VERSION"
       
-      # Устанавливаем переменные окружения для p4a
+      # Устанавливаем правильные переменные окружения
       - name: 🔧 Set Android environment
         run: |
-          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/25.2.9519653" >> $GITHUB_ENV
-          echo "PATH=$PATH:/usr/local/lib/android/sdk/platform-tools" >> $GITHUB_ENV
+          ANDROID_HOME="/usr/local/lib/android/sdk"
+          NDK_VERSION="${{ env.ANDROID_NDK_VERSION }}"
+          NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
+          
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          
+          # Добавляем компиляторы в PATH
+          echo "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          
+          echo "📌 NDK Path: $NDK_PATH"
+          echo "📌 Проверка наличия компилятора:"
+          ls -la $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang || echo "❌ Clang не найден!"
+      
+      # Проверка NDK
+      - name: ✅ Verify NDK installation
+        run: |
+          echo "🔍 Проверка NDK компонентов..."
+          NDK_PATH="/usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}"
+          
+          if [ ! -d "$NDK_PATH" ]; then
+            echo "❌ NDK не найден по пути: $NDK_PATH"
+            exit 1
+          fi
+          
+          echo "✅ NDK найден"
+          
+          # Проверяем компилятор
+          COMPILER_PATH="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          if [ -f "$COMPILER_PATH/clang" ]; then
+            echo "✅ Clang найден: $COMPILER_PATH/clang"
+            $COMPILER_PATH/clang --version
+          else
+            echo "❌ Clang не найден в $COMPILER_PATH"
+            echo "📋 Содержимое папки toolchains:"
+            ls -la $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/
+            exit 1
+          fi
       
       - name: 🏗️ Build APK with python-for-android
         run: |
@@ -105,7 +147,9 @@ jobs:
           # Создаем временную папку для логов
           mkdir -p build_logs
           
-          # Запускаем сборку с явным указанием API
+          NDK_PATH="/usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}"
+          
+          # Запускаем сборку с явным указанием всех путей
           p4a apk \
             --private . \
             --package="${{ env.PACKAGE_NAME }}" \
@@ -119,8 +163,9 @@ jobs:
             --permission READ_EXTERNAL_STORAGE \
             --orientation=landscape \
             --sdk_dir=/usr/local/lib/android/sdk \
-            --ndk_dir=/usr/local/lib/android/sdk/ndk/25.2.9519653 \
+            --ndk_dir=$NDK_PATH \
             --android_api 34 \
+            --ndk_version=25 \
             --window \
             --debug \
             --verbose 2>&1 | tee build_logs/build.log
@@ -148,6 +193,7 @@ jobs:
           cp "$FIRST_APK" "./$FILENAME_CLEAN"
           echo "📦 APK готов: $FILENAME_CLEAN"
           echo "filename=$FILENAME_CLEAN" >> $GITHUB_OUTPUT
+          echo "size=$(ls -lh $FILENAME_CLEAN | awk '{print $5}')" >> $GITHUB_OUTPUT
       
       - name: 📤 Upload APK
         uses: actions/upload-artifact@v4
@@ -155,3 +201,17 @@ jobs:
           name: ${{ steps.apk.outputs.filename }}
           path: ./${{ steps.apk.outputs.filename }}
           retention-days: 90
+      
+      - name: 📊 Build summary
+        run: |
+          echo "## 📱 Результат сборки" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Параметр | Значение |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Приложение** | ${{ env.APP_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Пакет** | \`${{ env.PACKAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Версия** | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Файл** | \`${{ steps.apk.outputs.filename }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Размер** | ${{ steps.apk.outputs.size }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Сборка успешно завершена!**" >> $GITHUB_STEP_SUMMARY
