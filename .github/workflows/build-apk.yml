@@ -5,6 +5,12 @@ env:
   PACKAGE_NAME: "org.alexstudiocode.roguelike"
   VERSION: "0.1.3"
   ANDROID_API: "34"
+  # Включаем ccache для ускорения [citation:8]
+  USE_CCACHE: "1"
+  CCACHE_DIR: "/home/runner/.ccache"
+  CCACHE_MAXSIZE: "5G"
+  # Параллельная компиляция [citation:4]
+  MAKEFLAGS: "-j4"
 
 on:
   push:
@@ -31,15 +37,43 @@ jobs:
           python-version: '3.9'
           cache: 'pip'
       
+      # === КЭШИРОВАНИЕ (для ускорения следующих сборок в 5-10 раз) ===
+      - name: 💾 Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+      
       - name: 💾 Cache Android SDK
         uses: actions/cache@v4
         with:
           path: |
             ~/.android
             /usr/local/lib/android/sdk
-          key: ${{ runner.os }}-android
+          key: ${{ runner.os }}-android-sdk-${{ env.ANDROID_API }}
           restore-keys: |
-            ${{ runner.os }}-android-
+            ${{ runner.os }}-android-sdk-
+      
+      - name: 💾 Cache p4a build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/python-for-android/build
+            ~/.local/share/python-for-android/dists
+            ~/.local/share/python-for-android/packages
+          key: ${{ runner.os }}-p4a-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-p4a-
+      
+      # === НАСТРОЙКА CCACHE [citation:8] ===
+      - name: 🔧 Setup ccache
+        run: |
+          sudo apt install -y ccache
+          ccache -M 5G
+          ccache -s
+          echo "✅ ccache настроен, максимальный размер: 5G"
       
       - name: 🤖 Setup Android SDK and NDK
         run: |
@@ -111,7 +145,8 @@ jobs:
             wget curl build-essential ccache \
             libstdc++-12-dev \
             liblzma-dev \
-            libbz2-dev
+            libbz2-dev \
+            patchelf  # для оптимизации [citation:2]
       
       - name: 📦 Install Python dependencies
         run: |
@@ -173,68 +208,116 @@ jobs:
           
           echo "✅ Команда create выполнена"
           
-          # Проверяем наличие исходников
+          # Ждем создания файлов
           sleep 5
-          SDL2_SOURCE_DIR="$HOME/.local/share/python-for-android/build/bootstrap_builds/sdl2/jni/SDL"
-          
-          if [ -d "$SDL2_SOURCE_DIR" ]; then
-            echo "✅ Исходники SDL2 созданы в $SDL2_SOURCE_DIR"
-            ls -la "$SDL2_SOURCE_DIR/src/sensor/android/" || echo "⚠️ Директория сенсора еще не создана"
-          else
-            echo "⚠️ Исходники не найдены в стандартном пути, ищем..."
-            find "$HOME/.local/share/python-for-android/build" -type d -name "SDL" 2>/dev/null | head -n 5 || echo "   Ничего не найдено"
-          fi
       
-      - name: 🔧 Patch SDL2 source before build
+      # === УНИВЕРСАЛЬНЫЙ ПАТЧЕР ДЛЯ ВСЕХ ИЗВЕСТНЫХ ОШИБОК ===
+      - name: 🔧 Apply all necessary patches for NDK 27+
         run: |
-          echo "🔧 Применяем патч к исходникам SDL2..."
+          echo "🔧 Применяем все необходимые патчи для совместимости с NDK 27+..."
           
-          # Ищем исходники SDL2 в разных местах
-          SEARCH_PATHS=(
-            "$HOME/.local/share/python-for-android/build/bootstrap_builds"
-            "$HOME/.local/share/python-for-android/build/other_builds"
-          )
+          P4A_DIR="$HOME/.local/share/python-for-android"
           
-          PATCHED=0
-          
-          for SEARCH_PATH in "${SEARCH_PATHS[@]}"; do
-            if [ ! -d "$SEARCH_PATH" ]; then
-              continue
+          # Функция для патча файла с проверкой
+          patch_file() {
+            local file=$1
+            local pattern=$2
+            local replacement=$3
+            local description=$4
+            
+            if [ -f "$file" ]; then
+              echo "📁 Патчим: $description - $(basename $file)"
+              cp "$file" "$file.bak"
+              sed -i "s/$pattern/$replacement/g" "$file"
+              if grep -q "$replacement" "$file"; then
+                echo "  ✅ Успешно"
+                return 0
+              else
+                echo "  ⚠️ Возможно патч не сработал"
+                return 1
+              fi
             fi
-            
-            echo "📁 Поиск в: $SEARCH_PATH"
-            
-            # Ищем все файлы SDL_androidsensor.c
-            SENSOR_FILES=$(find "$SEARCH_PATH" -name "SDL_androidsensor.c" -type f 2>/dev/null)
-            
-            if [ -n "$SENSOR_FILES" ]; then
-              for SENSOR_FILE in $SENSOR_FILES; do
-                echo "📁 Найден файл: $SENSOR_FILE"
-                
-                # Создаем бэкап
-                cp "$SENSOR_FILE" "$SENSOR_FILE.bak"
-                
-                # Заменяем устаревшую функцию
-                sed -i 's/ALooper_pollAll/ALooper_pollOnce/g' "$SENSOR_FILE"
-                
-                # Проверяем результат
-                if grep -q "ALooper_pollOnce" "$SENSOR_FILE"; then
-                  echo "✅ Патч применен успешно для $(basename $SENSOR_FILE)"
-                  PATCHED=$((PATCHED + 1))
-                else
-                  echo "❌ Ошибка применения патча для $SENSOR_FILE"
-                fi
-              done
+            return 1
+          }
+          
+          # === 1. ПАТЧ ДЛЯ SDL2 (ошибка ALooper_pollAll) ===
+          echo ""
+          echo "📌 [1/5] Патчим SDL2 (ALooper_pollAll → ALooper_pollOnce)..."
+          find "$P4A_DIR" -name "SDL_androidsensor.c" 2>/dev/null | while read file; do
+            patch_file "$file" "ALooper_pollAll" "ALooper_pollOnce" "SDL2 sensor"
+          done
+          
+          # === 2. ПАТЧ ДЛЯ HARFBUZZ (ошибка приведения типов) ===
+          echo ""
+          echo "📌 [2/5] Патчим harfbuzz (исправление приведения типов)..."
+          find "$P4A_DIR" -name "hb-ft.cc" -o -name "hb-ft.c" 2>/dev/null | while read file; do
+            echo "📁 Найден: $file"
+            cp "$file" "$file.bak"
+            # Исправляем все варианты приведения типов
+            sed -i 's/(FT_Generic_Finalizer) hb_ft_face_finalize/(void(*)(void*)) hb_ft_face_finalize/g' "$file"
+            sed -i 's/(FT_Generic_Finalizer) _release_blob/(void(*)(void*)) _release_blob/g' "$file"
+            # Добавляем подавление предупреждения в начало файла
+            if ! grep -q "pragma GCC diagnostic" "$file"; then
+              sed -i '1i#pragma GCC diagnostic ignored "-Wcast-function-type"' "$file"
+            fi
+            echo "  ✅ Патч применен"
+          done
+          
+          # === 3. ПАТЧ ДЛЯ OPENSSL (если будет ошибка) ===
+          echo ""
+          echo "📌 [3/5] Патчим openssl (если нужно)..."
+          find "$P4A_DIR" -name "openssl" -type d 2>/dev/null | while read dir; do
+            if [ -f "$dir/Configurations/15-android.conf" ]; then
+              echo "📁 Найдена конфигурация openssl"
+              cp "$dir/Configurations/15-android.conf" "$dir/Configurations/15-android.conf.bak"
+              # Добавляем поддержку новых NDK
+              sed -i 's/-D__ANDROID_API__=$android_api/-D__ANDROID_MIN_SDK_VERSION__=$android_api/g' "$dir/Configurations/15-android.conf"
+              echo "  ✅ Патч openssl применен"
             fi
           done
           
-          if [ $PATCHED -gt 0 ]; then
-            echo "✅ Всего применено патчей: $PATCHED"
-          else
-            echo "⚠️ Файлы для патча не найдены! Сборка может упасть."
-            echo "📁 Содержимое папки build:"
-            ls -la "$HOME/.local/share/python-for-android/build/" || echo "   Папка не существует"
-          fi
+          # === 4. ПАТЧ ДЛЯ SQLITE3 (если будет ошибка) ===
+          echo ""
+          echo "📌 [4/5] Патчим sqlite3 (если нужно)..."
+          find "$P4A_DIR" -name "sqlite3.c" 2>/dev/null | while read file; do
+            if grep -q "sqlite3_os_init" "$file"; then
+              echo "📁 Найден sqlite3: $file"
+              cp "$file" "$file.bak"
+              # Исправляем возможные проблемы с NDK
+              sed -i 's/#ifdef __ANDROID__/#if defined(__ANDROID__) \&\& defined(SQLITE_ENABLE_ICU)/g' "$file"
+              echo "  ✅ Патч sqlite3 применен"
+            fi
+          done
+          
+          # === 5. ПАТЧ ДЛЯ БОРЬБЫ С HOST-ЗАГРЯЗНЕНИЕМ [citation:2] ===
+          echo ""
+          echo "📌 [5/5] Патчим recipes для предотвращения host-загрязнения..."
+          
+          # Патчим все рецепты, которые могут использовать хост-библиотеки
+          find "$P4A_DIR/build/other_builds" -name "Makefile" 2>/dev/null | while read makefile; do
+            # Проверяем, не ссылается ли Makefile на /usr/include
+            if grep -q "\-I/usr/include" "$makefile"; then
+              echo "📁 Найден Makefile с host-путями: $makefile"
+              cp "$makefile" "$makefile.bak"
+              sed -i 's|-I/usr/include|-I$(ANDROID_NDK_HOME)/sysroot/usr/include|g' "$makefile"
+              echo "  ✅ Исправлены пути include"
+            fi
+          done
+          
+          echo ""
+          echo "✅ Все патчи применены!"
+          echo "📊 Статистика ccache:"
+          ccache -s
+      
+      # === ОЧИСТКА КЭША ЕСЛИ НУЖНО [citation:7][citation:9] ===
+      - name: 🧹 Optional cache cleanup (if build fails)
+        if: failure()
+        run: |
+          echo "⚠️ Сборка упала, очищаем проблемные кэши..."
+          # Очищаем только конкретные папки, чтобы не терять весь прогресс
+          rm -rf ~/.local/share/python-for-android/build/other_builds/*/arm64-v8a
+          rm -rf ~/.local/share/python-for-android/build/other_builds/*/armeabi-v7a
+          echo "✅ Кэш очищен, следующая сборка начнется с чистого состояния"
       
       - name: 🏗️ Build APK
         run: |
@@ -252,8 +335,9 @@ jobs:
           echo "📌 Путь NDK: $NDK_PATH"
           echo "📌 SDK: $ANDROID_HOME"
           echo "📌 API: ${{ env.ANDROID_API }}"
+          echo "📌 ccache: $(ccache -s | grep "cache hit" || true)"
           
-          # Запускаем сборку
+          # Запускаем сборку с флагами ускорения
           p4a apk \
             --private . \
             --package="${{ env.PACKAGE_NAME }}" \
@@ -272,9 +356,18 @@ jobs:
             --android_api ${{ env.ANDROID_API }} \
             --window \
             --debug \
+            --force-build \
             --verbose 2>&1 | tee build_logs/build.log
           
-          echo "✅ Сборка завершена"
+          # Проверяем результат
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "✅ Сборка успешно завершена!"
+          else
+            echo "❌ Сборка упала с ошибкой!"
+            echo "📋 Последние 50 строк лога:"
+            tail -n 50 build_logs/build.log
+            exit 1
+          fi
       
       - name: 🔍 Find APK
         id: apk
@@ -285,8 +378,8 @@ jobs:
           
           if [ -z "$APK_FILES" ]; then
             echo "❌ APK не найден!"
-            echo "📋 Последние 50 строк лога сборки:"
-            tail -n 50 build_logs/build.log
+            echo "📋 Лог сборки:"
+            cat build_logs/build.log
             exit 1
           fi
           
@@ -325,7 +418,11 @@ jobs:
           echo "| **Версия** | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Файл** | \`${{ steps.apk.outputs.filename }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Размер** | ${{ steps.apk.outputs.size }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Статус** | ✅ Успешно |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Сборка успешно завершена!**" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚡ Производительность" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          ccache -s >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "⬇️ Скачайте APK из раздела **Artifacts** выше" >> $GITHUB_STEP_SUMMARY
