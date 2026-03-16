@@ -116,17 +116,9 @@ jobs:
           echo 'export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:~/.buildozer/android/platform/android-sdk/platform-tools' >> ~/.bashrc
           export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:~/.buildozer/android/platform/android-sdk/platform-tools
           
-          # Проверяем sdkmanager
-          if [ -f ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
-            echo "✅ sdkmanager найден"
-            chmod +x ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
-          else
-            echo "⚠️ sdkmanager не найден, используем альтернативный метод"
-          fi
-          
           echo "✅ Пути SDK исправлены"
       
-            - name: 🤖 Accept Android licenses
+      - name: 🤖 Accept Android licenses
         run: |
           echo "🤖 Принятие лицензий Android SDK..."
           
@@ -166,21 +158,6 @@ jobs:
             cd ~/.buildozer/android/platform/android-sdk
             wget -q https://dl.google.com/android/repository/platform-tools-latest-linux.zip
             unzip -q platform-tools-latest-linux.zip
-          fi
-          
-          # Устанавливаем build-tools 33.0.0
-          mkdir -p ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0
-          cd ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0
-          
-          # Создаем заглушки для нужных инструментов
-          for tool in aapt aidl dexd8 d8 dx llvm-rs-cc; do
-            touch $tool
-            chmod +x $tool
-          done
-          
-          # Копируем aapt из системы если есть
-          if [ -f /usr/lib/android-sdk/build-tools/debian/aapt ]; then
-            cp /usr/lib/android-sdk/build-tools/debian/aapt ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0/
           fi
           
           echo "✅ Компоненты SDK установлены"
