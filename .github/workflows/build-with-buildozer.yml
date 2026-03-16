@@ -118,25 +118,37 @@ jobs:
           
           echo "✅ Пути SDK исправлены"
       
+      - name: 🔗 Create sdkmanager symlink
+        run: |
+          echo "🔗 Создание символической ссылки для sdkmanager..."
+          
+          # Создаем папку tools/bin если её нет
+          mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
+          
+          # Создаем символическую ссылку
+          if [ -f ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
+            ln -sf ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+            echo "✅ Символическая ссылка создана"
+          else
+            echo "⚠️ sdkmanager не найден, создаем заглушку"
+            echo '#!/bin/bash' > ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+            echo 'echo "sdkmanager stub"' >> ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+            echo 'exit 0' >> ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+            chmod +x ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+          fi
+          
+          ls -la ~/.buildozer/android/platform/android-sdk/tools/bin/
+      
       - name: 🤖 Accept Android licenses
         run: |
           echo "🤖 Принятие лицензий Android SDK..."
           
           export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:~/.buildozer/android/platform/android-sdk/platform-tools
           
-          # Создаем заглушку для sdkmanager если его нет
-          mkdir -p ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
-          if [ ! -f ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
-            echo '#!/bin/bash' > ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
-            echo 'echo "sdkmanager stub - accepting all licenses"' >> ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
-            echo 'exit 0' >> ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
-            chmod +x ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
+          # Используем sdkmanager для принятия лицензий
+          if [ -f ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager ]; then
+            yes | ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --licenses || true
           fi
-          
-          SDKMANAGER=~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
-          
-          # Принимаем лицензии
-          yes | $SDKMANAGER --licenses || true
           
           # Создаем файлы лицензий вручную
           mkdir -p ~/.android/licenses
