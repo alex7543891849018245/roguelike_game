@@ -5,7 +5,6 @@ env:
   PACKAGE_NAME: "org.alexstudiocode.roguelike"
   VERSION: "0.1.3"
   ANDROID_API: "34"
-  ANDROID_NDK_VERSION: "25.2.9519653"
 
 on:
   push:
@@ -38,7 +37,7 @@ jobs:
           path: |
             ~/.android
             /usr/local/lib/android/sdk
-          key: ${{ runner.os }}-android-${{ env.ANDROID_API }}-${{ env.ANDROID_NDK_VERSION }}
+          key: ${{ runner.os }}-android
           restore-keys: |
             ${{ runner.os }}-android-
       
@@ -47,61 +46,56 @@ jobs:
           export ANDROID_HOME="/usr/local/lib/android/sdk"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           
-          echo "📦 Установка Android SDK и NDK..."
+          echo "📦 Проверка Android SDK..."
           
-          # Создаем директории
+          # Создаем директории если нужно
           mkdir -p $ANDROID_HOME/cmdline-tools
           mkdir -p $ANDROID_HOME/licenses
           
-          # Скачиваем command line tools если их нет
+          # Проверяем наличие command line tools
           if [ ! -d "$ANDROID_HOME/cmdline-tools/latest" ]; then
             echo "📥 Скачивание command line tools..."
             wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
             unzip -q commandlinetools-linux-9477386_latest.zip -d $ANDROID_HOME/cmdline-tools
             mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-          else
-            echo "✅ Command line tools уже установлены"
           fi
-          
-          # Добавляем в PATH
-          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
           
           # Принимаем лицензии
           touch $ANDROID_HOME/licenses/android-sdk-license
           echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > $ANDROID_HOME/licenses/android-sdk-license
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license
           
-          # Устанавливаем platform-tools если нет
-          if [ ! -d "$ANDROID_HOME/platform-tools" ]; then
-            echo "📥 Установка platform-tools..."
-            yes | sdkmanager --licenses > /dev/null 2>&1 || true
-            sdkmanager "platform-tools" --verbose
-          else
-            echo "✅ platform-tools уже установлены"
-          fi
-          
-          # Устанавливаем платформу если нет
-          if [ ! -d "$ANDROID_HOME/platforms/android-${{ env.ANDROID_API }}" ]; then
-            echo "📥 Установка Android API ${{ env.ANDROID_API }}..."
-            sdkmanager "platforms;android-${{ env.ANDROID_API }}" --verbose
-          else
-            echo "✅ Android API ${{ env.ANDROID_API }} уже установлен"
-          fi
-          
-          # Устанавливаем NDK если нет
-          NDK_PATH="$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}"
-          if [ ! -d "$NDK_PATH" ]; then
-            echo "📥 Установка NDK ${{ env.ANDROID_NDK_VERSION }}..."
-            sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}" --verbose
-          else
-            echo "✅ NDK ${{ env.ANDROID_NDK_VERSION }} уже установлен"
-          fi
-          
           echo "✅ Android SDK готов"
-          echo "📁 Содержимое SDK:"
-          ls -la $ANDROID_HOME/
-          echo "📁 Содержимое NDK:"
-          ls -la $ANDROID_HOME/ndk/ || echo "NDK папка пуста"
+      
+      - name: 🔍 Find NDK version
+        id: ndk
+        run: |
+          ANDROID_HOME="/usr/local/lib/android/sdk"
+          
+          # Ищем любую установленную версию NDK
+          if [ -d "$ANDROID_HOME/ndk" ]; then
+            NDK_VERSIONS=$(ls -1 $ANDROID_HOME/ndk/ | sort -V)
+            NDK_COUNT=$(echo "$NDK_VERSIONS" | wc -l)
+            
+            if [ "$NDK_COUNT" -gt 0 ]; then
+              # Берем первую (самую старую/стабильную) версию
+              NDK_VERSION=$(echo "$NDK_VERSIONS" | head -n 1)
+              NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
+              
+              echo "📌 Найдена версия NDK: $NDK_VERSION"
+              echo "ndk_version=$NDK_VERSION" >> $GITHUB_OUTPUT
+              echo "ndk_path=$NDK_PATH" >> $GITHUB_OUTPUT
+              echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+              echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+              echo "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+            else
+              echo "❌ NDK не найден!"
+              exit 1
+            fi
+          else
+            echo "❌ Папка ndk не существует!"
+            exit 1
+          fi
       
       - name: 📦 Install system dependencies
         run: |
@@ -131,52 +125,16 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📌 Версия: $VERSION"
       
-      - name: 🔧 Set Android environment
-        run: |
-          ANDROID_HOME="/usr/local/lib/android/sdk"
-          NDK_VERSION="${{ env.ANDROID_NDK_VERSION }}"
-          NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
-          
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
-          echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
-          echo "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
-          
-          echo "📌 NDK Path: $NDK_PATH"
-      
       - name: ✅ Verify NDK
         run: |
           ANDROID_HOME="/usr/local/lib/android/sdk"
-          NDK_VERSION="${{ env.ANDROID_NDK_VERSION }}"
-          NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
+          NDK_PATH="${{ steps.ndk.outputs.ndk_path }}"
           
           echo "📁 Проверка NDK по пути: $NDK_PATH"
           
-          if [ ! -d "$NDK_PATH" ]; then
-            echo "❌ NDK не найден по указанному пути!"
-            echo "📁 Доступные версии NDK:"
-            ls -la $ANDROID_HOME/ndk/ || echo "   Папка ndk не существует"
-            echo ""
-            echo "📁 Содержимое ANDROID_HOME:"
-            ls -la $ANDROID_HOME/
-            exit 1
-          fi
-          
           TOOLCHAIN_PATH="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "📁 Проверка toolchains по пути: $TOOLCHAIN_PATH"
-          
-          if [ ! -d "$TOOLCHAIN_PATH" ]; then
-            echo "❌ Папка toolchains не найдена!"
-            echo "📁 Содержимое NDK:"
-            ls -la $NDK_PATH/
-            echo ""
-            echo "📁 Содержимое toolchains (если есть):"
-            ls -la $NDK_PATH/toolchains/ || echo "   toolchains папка не существует"
-            exit 1
-          fi
-          
           CLANG_PATH="$TOOLCHAIN_PATH/clang"
+          
           if [ -f "$CLANG_PATH" ]; then
             echo "✅ Clang найден: $CLANG_PATH"
             $CLANG_PATH --version
@@ -196,7 +154,10 @@ jobs:
           mkdir -p build_logs
           
           ANDROID_HOME="/usr/local/lib/android/sdk"
-          NDK_PATH="$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}"
+          NDK_PATH="${{ steps.ndk.outputs.ndk_path }}"
+          
+          # Извлекаем версию NDK из пути
+          NDK_VERSION=$(basename $NDK_PATH)
           
           p4a apk \
             --private . \
@@ -212,6 +173,7 @@ jobs:
             --orientation=landscape \
             --sdk_dir=$ANDROID_HOME \
             --ndk_dir=$NDK_PATH \
+            --ndk_version=$NDK_VERSION \
             --android_api 34 \
             --window \
             --debug \
@@ -238,7 +200,6 @@ jobs:
           cp "$FIRST_APK" "./$FILENAME_CLEAN"
           echo "📦 APK готов: $FILENAME_CLEAN"
           echo "filename=$FILENAME_CLEAN" >> $GITHUB_OUTPUT
-          echo "size=$(ls -lh $FILENAME_CLEAN | awk '{print $5}')" >> $GITHUB_OUTPUT
       
       - name: 📤 Upload APK
         uses: actions/upload-artifact@v4
@@ -246,17 +207,3 @@ jobs:
           name: ${{ steps.apk.outputs.filename }}
           path: ./${{ steps.apk.outputs.filename }}
           retention-days: 90
-      
-      - name: 📊 Build summary
-        run: |
-          echo "## 📱 Результат сборки" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Параметр | Значение |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Приложение** | ${{ env.APP_NAME }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Пакет** | \`${{ env.PACKAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Версия** | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Файл** | \`${{ steps.apk.outputs.filename }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Размер** | ${{ steps.apk.outputs.size }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Сборка успешно завершена!**" >> $GITHUB_STEP_SUMMARY
