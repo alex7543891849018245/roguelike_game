@@ -1,0 +1,30 @@
+#:kivy 2.1.0
+
+<InventoryScreen>:
+    name: 'inventory'
+    
+    BoxLayout:
+        orientation: 'vertical'
+        padding: 20
+        spacing: 10
+        
+        Label:
+            text: 'ИНВЕНТАРЬ'
+            font_size: '30sp'
+            bold: True
+            color: (1, 0.84, 0, 1)
+            size_hint_y: 0.1
+        
+        ScrollView:
+            size_hint_y: 0.8
+            GridLayout:
+                id: inventory_grid
+                cols: 1
+                spacing: 5
+                size_hint_y: None
+                height: self.minimum_height
+        
+        Button:
+            text: 'Закрыть'
+            size_hint_y: 0.1
+            on_press: root.close_inventory()

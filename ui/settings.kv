@@ -1,0 +1,67 @@
+#:kivy 2.1.0
+
+<SettingsScreen>:
+    name: 'settings'
+    
+    BoxLayout:
+        orientation: 'vertical'
+        padding: 20
+        spacing: 20
+        
+        Label:
+            text: 'НАСТРОЙКИ'
+            font_size: '30sp'
+            bold: True
+            color: (1, 0.84, 0, 1)
+            size_hint_y: 0.1
+        
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_y: 0.7
+            spacing: 10
+            
+            BoxLayout:
+                size_hint_y: 0.2
+                Label:
+                    text: 'Звук:'
+                Switch:
+                    id: sound_switch
+            
+            BoxLayout:
+                size_hint_y: 0.2
+                Label:
+                    text: 'Музыка:'
+                Switch:
+                    id: music_switch
+            
+            BoxLayout:
+                size_hint_y: 0.2
+                Label:
+                    text: 'Громкость звука:'
+                Slider:
+                    id: sound_slider
+                    min: 0
+                    max: 100
+                    value: 70
+            
+            BoxLayout:
+                size_hint_y: 0.2
+                Label:
+                    text: 'Громкость музыки:'
+                Slider:
+                    id: music_slider
+                    min: 0
+                    max: 100
+                    value: 50
+            
+            BoxLayout:
+                size_hint_y: 0.2
+                Label:
+                    text: 'Сенсорное управление:'
+                Switch:
+                    id: touch_switch
+        
+        Button:
+            text: 'Назад'
+            size_hint_y: 0.1
+            on_press: root.back_to_menu()

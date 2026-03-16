@@ -1,0 +1,52 @@
+#:kivy 2.1.0
+
+<MenuScreen>:
+    name: 'menu'
+    
+    FloatLayout:
+        canvas:
+            Color:
+                rgba: 0.2, 0.2, 0.3, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint: (0.6, 0.7)
+            pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+            spacing: 20
+            
+            Label:
+                text: 'ROGUELIKE ADVENTURE'
+                font_size: '40sp'
+                bold: True
+                color: (1, 0.84, 0, 1)
+                size_hint_y: 0.3
+            
+            Button:
+                text: 'Новая игра'
+                size_hint_y: 0.15
+                on_press: root.new_game()
+            
+            Button:
+                text: 'Загрузить'
+                size_hint_y: 0.15
+                on_press: root.load_game()
+            
+            Button:
+                text: 'Настройки'
+                size_hint_y: 0.15
+                on_press: root.open_settings()
+            
+            Button:
+                text: 'Выход'
+                size_hint_y: 0.15
+                on_press: root.quit_game()
+            
+            Label:
+                id: message_label
+                text: ''
+                font_size: '16sp'
+                color: (1, 0, 0, 1)
+                size_hint_y: 0.1

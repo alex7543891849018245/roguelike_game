@@ -1,0 +1,42 @@
+#:kivy 2.1.0
+
+<GameOverScreen>:
+    name: 'game_over'
+    
+    FloatLayout:
+        canvas:
+            Color:
+                rgba: 0.5, 0, 0, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint: (0.6, 0.6)
+            pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+            spacing: 20
+            
+            Label:
+                text: 'GAME OVER'
+                font_size: '50sp'
+                bold: True
+                color: (1, 1, 1, 1)
+                size_hint_y: 0.3
+            
+            Label:
+                id: stats_label
+                text: ''
+                font_size: '20sp'
+                color: (1, 1, 1, 1)
+                size_hint_y: 0.4
+            
+            Button:
+                text: 'Новая игра'
+                size_hint_y: 0.15
+                on_press: root.new_game()
+            
+            Button:
+                text: 'В меню'
+                size_hint_y: 0.15
+                on_press: root.back_to_menu()
