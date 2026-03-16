@@ -96,27 +96,31 @@ jobs:
           rm -rf ~/.ccache
           echo "✅ Кэш очищен"
       
-      - name: 🔧 Fix SDK paths
+      - name: 📥 Download and setup real sdkmanager
         run: |
-          echo "🔧 Исправление путей SDK..."
+          echo "📥 Скачивание настоящего sdkmanager..."
           
-          # Создаем правильную структуру папок
-          mkdir -p ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
-          mkdir -p ~/.buildozer/android/platform/android-sdk/platform-tools
-          mkdir -p ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0
-          mkdir -p ~/.buildozer/android/platform/android-sdk/platforms/android-33
+          # Создаем папки
+          mkdir -p ~/.buildozer/android/platform/android-sdk/cmdline-tools
           
-          # Скачиваем правильные command line tools
+          # Скачиваем command line tools
           cd ~/.buildozer/android/platform/android-sdk/cmdline-tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q commandlinetools-linux-9477386_latest.zip
           mv cmdline-tools latest 2>/dev/null || true
           
-          # Добавляем в PATH
-          echo 'export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:~/.buildozer/android/platform/android-sdk/platform-tools' >> ~/.bashrc
-          export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:~/.buildozer/android/platform/android-sdk/platform-tools
+          # Проверяем
+          if [ -f ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
+            echo "✅ Настоящий sdkmanager скачан"
+            chmod +x ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
+          else
+            echo "❌ Ошибка скачивания sdkmanager"
+            exit 1
+          fi
           
-          echo "✅ Пути SDK исправлены"
+          # Добавляем в PATH
+          echo "export PATH=\$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin" >> ~/.bashrc
+          export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
       
       - name: 🤖 Accept Android licenses with real sdkmanager
         run: |
@@ -125,16 +129,13 @@ jobs:
           export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
           export ANDROID_HOME=~/.buildozer/android/platform/android-sdk
           
-          # Проверяем наличие настоящего sdkmanager
-          if [ ! -f ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
-            echo "❌ Настоящий sdkmanager не найден!"
-            exit 1
-          fi
+          SDKMANAGER=~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
           
           # Принимаем лицензии
-          yes | ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          echo "📋 Принимаем все лицензии..."
+          yes | $SDKMANAGER --licenses || true
           
-          # Создаем файлы лицензий вручную (на всякий случай)
+          # Создаем файлы лицензий вручную
           mkdir -p ~/.android/licenses
           echo "8933bad161af4178b1185d1a37fbf41ea5269c55" >> ~/.android/licenses/android-sdk-license
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> ~/.android/licenses/android-sdk-license
@@ -149,30 +150,29 @@ jobs:
           export PATH=$PATH:~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
           export ANDROID_HOME=~/.buildozer/android/platform/android-sdk
           
-          SDKMANAGER_REAL=~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
+          SDKMANAGER=~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager
           
           # Устанавливаем необходимые компоненты
           echo "📥 Устанавливаем platform-tools..."
-          $SDKMANAGER_REAL "platform-tools" || true
+          $SDKMANAGER "platform-tools" || true
           
           echo "📥 Устанавливаем platforms;android-33..."
-          $SDKMANAGER_REAL "platforms;android-33" || true
+          $SDKMANAGER "platforms;android-33" || true
           
           echo "📥 Устанавливаем build-tools;33.0.0..."
-          $SDKMANAGER_REAL "build-tools;33.0.0" || true
+          $SDKMANAGER "build-tools;33.0.0" || true
           
           # Проверяем установку
           echo "✅ Проверка установленных компонентов:"
-          $SDKMANAGER_REAL --list | grep -E "platform-tools|build-tools;33|platforms;android-33" || true
+          $SDKMANAGER --list | grep -E "platform-tools|build-tools;33|platforms;android-33" || true
           
-          # Создаем символическую ссылку для совместимости
+          # Создаем символическую ссылку для совместимости с buildozer
           mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
-          ln -sf $SDKMANAGER_REAL ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+          ln -sf $SDKMANAGER ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
           
           # Проверяем наличие build-tools
           if [ -d ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0 ]; then
             echo "✅ build-tools 33.0.0 успешно установлены"
-            ls -la ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0/
           else
             echo "⚠️ build-tools не установлены, создаем заглушки"
             mkdir -p ~/.buildozer/android/platform/android-sdk/build-tools/33.0.0
