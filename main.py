@@ -1,8 +1,3 @@
-"""
-Roguelike Adventure - Kivy Version
-Main entry point for the game
-"""
-
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.core.window import Window

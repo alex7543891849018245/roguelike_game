@@ -34,21 +34,32 @@ class Config:
             self.vibration = False
     
     def setup_paths(self):
-        """
-        Setup paths for different platforms
-        """
         if platform == 'android':
-            from android.storage import primary_external_storage_path
-            self.base_path = primary_external_storage_path() + '/roguelike/'
+            # ИСПОЛЬЗУЕМ ВНУТРЕННЕЕ ХРАНИЛИЩЕ (не требует разрешений)
+            from jnius import autoclass
+            
+            # Получаем контекст приложения
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            context = PythonActivity.mActivity
+            
+            # getFilesDir() возвращает путь к внутреннему хранилищу приложения
+            # Например: /data/user/0/org.alexstudiocode.roguelike.roguelike/files
+            self.base_path = context.getFilesDir().getAbsolutePath() + '/'
+            
+            # Папка для сохранений внутри приватного хранилища
+            self.save_path = os.path.join(self.base_path, 'saves/')
+            
+            # Ассеты читаются из APK, путь относительный
+            self.assets_path = 'assets/'
+            
         else:
+            # Для Windows/других платформ
             self.base_path = os.path.dirname(os.path.dirname(__file__)) + '/'
+            self.save_path = os.path.join(self.base_path, 'saves/')
+            self.assets_path = os.path.join(self.base_path, 'assets/')
         
-        self.save_path = os.path.join(self.base_path, 'saves/')
-        self.assets_path = os.path.join(self.base_path, 'assets/')
-        
-        # Создание папок если их нет
+        # Создаём папки если их нет
         os.makedirs(self.save_path, exist_ok=True)
-        os.makedirs(self.assets_path, exist_ok=True)
 
 # Глобальные константы (для запасных вариантов, если нет спрайтов)
 BLACK = (0, 0, 0, 1)
