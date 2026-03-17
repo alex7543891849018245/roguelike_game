@@ -63,9 +63,13 @@ class LoadingScreen(Screen):
         super().__init__(**kwargs)
         self.loading_effect = None
         self.effects_added = False
+        self.loading_start_time = 0
         
     def on_enter(self):
         """Called when screen is entered"""
+        # Запоминаем время начала загрузки
+        self.loading_start_time = Clock.get_time()
+        
         # Создаем эффект загрузки
         if not self.effects_added:
             self.loading_effect = LoadingEffect()
@@ -74,12 +78,15 @@ class LoadingScreen(Screen):
         
         # Запускаем загрузку
         self.loading_effect.start_loading()
-        Clock.schedule_interval(self.check_loading_finished, 0.1)
+        
+        # Планируем проверку
+        Clock.schedule_interval(self.check_loading, 0.1)
     
-    def check_loading_finished(self, dt):
-        """Check if loading is finished"""
-        if self.loading_effect and self.loading_effect.is_finished():
-            Clock.unschedule(self.check_loading_finished)
+    def check_loading(self, dt):
+        """Check if loading should finish"""
+        # Прошло уже 2 секунды?
+        if Clock.get_time() - self.loading_start_time > 2.0:
+            Clock.unschedule(self.check_loading)
             
             # Переходим в игру или меню
             app = App.get_running_app()
@@ -87,9 +94,13 @@ class LoadingScreen(Screen):
                 self.manager.current = 'game'
             else:
                 self.manager.current = 'menu'
+            return False
+        
+        return True  # продолжаем проверку
     
     def on_leave(self):
         """Called when leaving screen"""
+        Clock.unschedule(self.check_loading)
         if self.loading_effect:
             self.remove_widget(self.loading_effect)
             self.effects_added = False
